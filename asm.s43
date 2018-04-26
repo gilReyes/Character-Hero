@@ -1,0 +1,282 @@
+#include "msp430.h"                     ; #define controlled include file
+
+        NAME    main                    ; module name
+
+        PUBLIC  main                    ; make the main label vissible
+
+        ORG     0200h
+sequence     db 'A' ,' ','B' ,'A','C',' ','B','B','A',' ','C','A','A',' ','A','B','B','B', ' ','B',' ','A'
+display      db ' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' '
+delay        dw 5000
+gameSpeed dw   65000
+        ORG     0C000h
+;------------------------------------------------------------------------------
+                        ;MACRO Initialization
+;------------------------------------------------------------------------------
+;Macro for sending a command to the display with the  parameter
+mCommand MACRO input
+      MOV.B input, &P1OUT               ; Put data on output port
+      call #subDelay
+      BIC.B #0x01, &P2OUT
+      call #subDelay
+      BIS.B #0x04, &P2OUT               ; Enable Pulse
+      call #subDelay
+      BIC.B #0x04, &P2OUT               ; Disable Pulse
+      call #subDelay
+      ENDM
+;Macro for writing the parameter in the display
+mWriteCommand MACRO input
+      MOV.B input, &P1OUT               ; Put data on output port
+      BIS.B #0x01,&P2OUT
+      BIS.B #0x04, &P2OUT               ; Enable Pulse
+      call #subDelay
+      BIC.B #0x04, &P2OUT               ; Disable Pulse
+      call #subDelay
+      ENDM
+; Macro for printing an array and add an item to it in the display
+mPrintDisplay MACRO array, item
+      local loop
+      MOV.B #0x80, R12
+      MOV array, R5
+      MOV.B #0x13, R8
+      mCommand R12
+loop: mWriteCommand @R5
+      ADD #1,R5
+      ADD #1, R12
+      mCommand R12
+      DEC R8
+      jnz loop
+      mWriteCommand item
+      MOV.B item,0(R5)
+  ENDM
+;Macro for shifting left an array
+mShiftDisplay MACRO array
+      local loop
+      MOV array,R9
+      MOV array,R10
+      MOV.B #0x13, R11
+      ADD #1, R9
+loop: MOV.B @R9+,0(R10)
+      ADD #1, R10
+      DEC R11
+      jnz loop
+      ENDM
+
+      
+;------------------------------------------------------------------------------
+                        ;SubRoutine Initialization
+;------------------------------------------------------------------------------
+subDelay: ;Subroutine to make a delay
+      PUSH R5
+      MOV.W delay,R5
+loop: SUB #0x01,R5
+      jnz loop
+      POP R5
+      ret
+;LCD initializaation using 8-bit format
+subInitLCD:
+      BIC.b #0x04, &P2OUT
+        
+      call #subDelay
+        
+      mCommand #0x30
+      call #subDelay
+      mCommand #0x30
+      call #subDelay
+      mCommand #0x30
+      call #subDelay
+        
+      mCommand #0x38
+        
+      mCommand #0x10
+        
+      mCommand #0x0F
+        
+      mCommand #0x06
+      
+      mCommand #0x01
+      ret
+; Writing WELCOME to CHARACTER HERO in the display     
+subWelcomeMsg:
+      mCommand #0x01
+      mCommand #0x84
+      mWriteCommand #0x57
+      mWriteCommand #0x45
+      mWriteCommand #0x4C
+      mWriteCommand #0x43
+      mWriteCommand #0x4F
+      mWriteCommand #0x4D
+      mWriteCommand #0x45
+      mWriteCommand #0x20
+      mWriteCommand #0x20
+      mWriteCommand #0x74
+      mWriteCommand #0x6F
+      mCommand #0xC3
+      mWriteCommand #0x43
+      mWriteCommand #0x68
+      mWriteCommand #0x61
+      mWriteCommand #0x72
+      mWriteCommand #0x61
+      mWriteCommand #0x63
+      mWriteCommand #0x74
+      mWriteCommand #0x65
+      mWriteCommand #0x72
+      mWriteCommand #0x20
+      mWriteCommand #0x48
+      mWriteCommand #0x45
+      mWriteCommand #0x52
+      mWriteCommand #0x4F
+     ret
+; Writing the game screen with the initial score and the cursor
+subInitGameScreen:
+        MOV.W #0x33, R7
+        mCommand #0x01
+        mCommand #0x0C
+        mCommand #0xCA
+        mWriteCommand #0xFF
+        mCommand #0xC0
+        mWriteCommand #0x53
+        mWriteCommand #0x63
+        mWriteCommand #0x6F
+        mWriteCommand #0x72
+        mWriteCommand #0x65
+        mWriteCommand #0x3A
+        mWriteCommand R7
+     ret
+; Substract 1 to the current score
+subDecrementScore:
+        SUB #0x01, R7
+        mCommand #0xC6
+        mWriteCommand R7
+        CMP.B #0x30,R7
+        jz subGameOver
+        bic.b   #10000000b,&P2OUT
+        bis.b   #01000000b,&P2OUT       ; turn on red LED
+        MOV.B #0x0, &P2IFG
+        ret
+; Keep track of the score streak if the counter is 5 increment the current score by 1
+subIncrementStreak:
+        INC R13
+        MOV.B #0x20, &0x21F
+        CMP.B #0x35,R13
+        jz subIncrementScore
+        bic.b   #01000000b,&P2OUT
+        bis.b   #10000000b,&P2OUT       ; turn on green LED and
+        MOV.B 0x0,&P2IFG
+        jmp     fin 
+; Increment the score on the lcd and call for displaying that you won if necesary
+subIncrementScore:
+        ADD #0x1, R7
+        MOV.W #0x0, R13
+        mCommand #0xC6
+        mWriteCommand R7
+        CMP #0x34, R7
+        jz subGameWin
+        ret
+;Display Win in the LCD
+subGameWin:
+      mCommand #0x01
+      mCommand #0x84
+      mWriteCommand #0x57
+      mWriteCommand #0x49
+      mWriteCommand #0x4E
+        JMP $
+;Display game over in the LCD
+subGameOver:
+      mCommand #0x01
+      mCommand #0x84
+      mWriteCommand #0x47
+      mWriteCommand #0x41
+      mWriteCommand #0x4D
+      mWriteCommand #0x45
+      mWriteCommand #0x20
+      mWriteCommand #0x4F
+      mWriteCommand #0x56
+      mWriteCommand #0x45
+      mWriteCommand #0x52
+      JMP $
+   
+;------------------------------------------------------------------------------
+                        ; Main Module
+;------------------------------------------------------------------------------                  
+main:   NOP                             ; main program
+RESET:  MOV.W   #0x400, SP
+        MOV.W   #WDTPW+WDTHOLD,&WDTCTL  ; Stop watchdog timer
+        MOV.B   #0xFF, &P1DIR           ; Setting port 1 pins to output
+        MOV.B   #0xC7, &P2DIR           ; Setting P2.0 & P2.1 to output and P2.3,P2.4 & P2.5 to input
+        MOV.B   #0x38, &P2IE            ; Enabling interrupts
+        MOV.B   #0xC7, &P2IES           ; Setting edge for interrupts
+        MOV.B   #0x00, &P2SEL           ; Setting P2.6 & P2.7
+        MOV.B   #0x00, &P2IFG           ; Reseting interrupt flags
+        EINT                            ; Enbling global interrupts
+        NOP
+        
+        call #subInitLCD                ; LCD Initialization 8bit mode        
+        call #subWelcomeMsg             ; Display Welcome Message on LCD
+        call #subDelay
+        call #subDelay
+        call #subDelay
+        call #subInitGameScreen         ; Set Up Game Screen
+        MOV #sequence,R14 ;Pointer for sequence
+        MOV.B #32,R15     ; Loop counter
+        MOV.B #0x30, R13  ; Streak Counter      
+        MOV.B   #0x00, &P2IFG
+gameLoop:
+        mPrintDisplay #display,@R14 ; Print array
+        mShiftDisplay #display      ; Shift array
+        ADD #1,R14
+        CMP.B #0x20,&0x21E          ; Check if a letter passed the cursor without beign pressed
+        jz continue
+        call #subDecrementScore
+continue:
+        DEC R15
+        
+        jnz gameLoop
+        JMP $                           ; jump to current location '$'
+        
+PBISR 
+        SUB #100,&delay
+        bit.b   #00001000b, &P2IFG      ; Test P1IFG to detect if there is
+                                        ; an interrupt generated by P2.3
+                                        ; that corresponds to push button
+                                        
+        jz button2                     ; if no interrupt from push button
+        CMP.B #0x41,&0x21F             ; Check if A is in the cursor position
+        jz subIncrementStreak
+        MOV.B #0x0, &P2IFG
+        jmp     fin                     ; go to end of ISR
+        
+        
+        
+button2: bit.b   #00010000b, &P2IFG      ; Test P1IFG to detect if there is
+                                        ; an interrupt generated by P2.4
+                                        ; that corresponds to push button
+                                        
+        jz button3                     ; if no interrupt from push button
+        CMP.B #0x42,&0x21F             ; Check if B is in the cursor position
+        jz subIncrementStreak
+        MOV.B #0x0, &P2IFG
+        jmp     fin                     ; go to end of ISR
+
+button3: bit.b   #00100000b, &P2IFG      ; Test P1IFG to detect if there is
+                                        ; an interrupt generated by P2.5
+                                        ; that corresponds to push button
+                                        
+        jz fin                     ; if no interrupt from push button
+        CMP.B #0x43,&0x21F          ; Check if B is in the cursor position
+        jz subIncrementStreak  
+        MOV.B #0x0, &P2IFG
+        jmp     fin                     ; go to end of ISR
+        
+fin:    reti                            ; Return from interrupt
+
+;-------------------------------------------------------------------------
+                  ; Interrupts
+;-------------------------------------------------------------------------
+        ORG 0FFFEh
+        DW  RESET
+    ORG 0FFE6h                  ; set reset vector for input in
+    DW PBISR               ; Port2. Interrupts generated by Port 
+;-------------------------------------------------------------------------
+
+        END
